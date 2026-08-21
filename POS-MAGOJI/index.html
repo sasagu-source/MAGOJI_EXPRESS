@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>MAGOJI POS — Kasir Retail Offline-First</title>
+<link rel="preconnect" href="https://api.whatsapp.com">
+<link rel="dns-prefetch" href="https://api.whatsapp.com">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💖</text></svg>">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.0.8/400.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/plus-jakarta-sans@5.0.8/500.css">
@@ -305,6 +307,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
 .modal-body{padding:18px 20px;overflow-y:auto}
 .modal-foot{padding:13px 20px 17px;display:flex;gap:9px;justify-content:flex-end;border-top:1px solid var(--line);background:#fbfcfe;flex-wrap:wrap}
 .x-btn{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--muted)}.x-btn:hover{background:#f1f5f9;color:var(--ink)}
+/* PANEL MELAYANG ANTRIAN DAPUR (bukan modal blocking) */
+.dapur-float{position:fixed;bottom:20px;right:20px;width:320px;max-width:calc(100vw - 24px);max-height:min(70vh,560px);background:#fff;border-radius:16px;box-shadow:0 16px 40px -10px rgba(15,23,42,.35);border:1px solid var(--line);z-index:90;display:none;flex-direction:column;overflow:hidden;animation:pop .22s cubic-bezier(.2,1.2,.4,1)}
+.dapur-float.open{display:flex}
+.dapur-float .modal-head{padding:13px 16px 10px;background:linear-gradient(135deg,#fff7ed,#fff)}
+.dapur-float .modal-body{padding:12px;max-height:calc(min(70vh,560px) - 100px)}
+.dapur-float .modal-foot{padding:10px 16px 13px}
+@media (max-width:640px){.dapur-float{right:12px;left:12px;bottom:12px;width:auto}}
 .pay-total-box{background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;border-radius:15px;padding:16px 18px;text-align:center;margin-bottom:15px}
 .pay-total-box .lbl{font-size:11px;opacity:.75;font-weight:700;letter-spacing:1px;text-transform:uppercase}
 .pay-total-box .amt{font-size:30px;font-weight:800;letter-spacing:-.5px}
@@ -1006,7 +1015,13 @@ Produk ini punya variasi ukuran
 <div class="modal-head"><b>Pembayaran</b><button class="x-btn" data-close="paymentModal"><span data-ic="x"></span></button></div>
 <div class="modal-body">
 <div class="pay-total-box"><div class="lbl">Total Tagihan</div><div class="amt" id="payTotal">Rp 0</div></div>
-<div class="field" id="payPhoneField" style="display:none"><label>No. HP (untuk notifikasi WA saat pesanan siap)</label><input class="input" id="payPhone" type="tel" placeholder="08xxxxxxxxxx (opsional)"></div>
+<div class="field" id="payCustField" style="display:none"><label>Nama Pelanggan <span style="color:var(--rose)">* wajib untuk pesanan dapur</span></label><input class="input" id="payCustName" placeholder="Nama pelanggan"></div>
+<div class="field" id="payWaitModeField" style="display:none"><label>Pelanggan menunggu di tempat atau sambil jalan?</label>
+<div style="display:flex;gap:8px">
+<button type="button" class="btn btn-ghost btn-sm" id="btnWaitTunggu" data-waitmode="tunggu" style="flex:1"><span data-ic="clock"></span>Tunggu di sini</button>
+<button type="button" class="btn btn-ghost btn-sm" id="btnWaitJalan" data-waitmode="jalan" style="flex:1"><span data-ic="wa"></span>Sambil jalan</button>
+</div></div>
+<div class="field" id="payPhoneField" style="display:none"><label>No. WhatsApp (untuk notifikasi saat pesanan siap)</label><input class="input" id="payPhone" type="tel" placeholder="08xxxxxxxxxx (opsional)"></div>
 <div class="method-tabs">
 <button class="method-tab active" data-method="Tunai"><span data-ic="banknote"></span>Tunai</button>
 <button class="method-tab" data-method="QRIS"><span data-ic="qr-code"></span>QRIS</button>
@@ -1040,12 +1055,12 @@ Produk ini punya variasi ukuran
 <button class="btn btn-primary" id="btnPrint"><span data-ic="printer"></span>Cetak</button>
 </div>
 </div></div>
-<!-- MODAL: ANTRIAN DAPUR -->
-<div class="modal-overlay" id="dapurModal"><div class="modal">
+<!-- PANEL MELAYANG: ANTRIAN DAPUR -->
+<div class="dapur-float" id="dapurModal">
 <div class="modal-head"><b>Antrian Dapur <span class="cnt" id="dapurQueueCnt"></span></b><button class="x-btn" data-close="dapurModal"><span data-ic="x"></span></button></div>
 <div class="modal-body"><div id="dapurQueueList" style="display:flex;flex-wrap:wrap;gap:10px"></div></div>
 <div class="modal-foot"><button class="btn btn-ghost" data-close="dapurModal">Tutup</button></div>
-</div></div>
+</div>
 <!-- MODAL: KIRIM WA -->
 <div class="modal-overlay" id="waModal"><div class="modal">
 <div class="modal-head"><b>Kirim Nota via WhatsApp</b><button class="x-btn" data-close="waModal"><span data-ic="x"></span></button></div>
@@ -1409,31 +1424,65 @@ $('#setSyncDot').className='dot '+dot;$('#setSyncTitle').textContent=db?'Firebas
 $('#setSyncSub').textContent=db?('Data tersinkron real-time. '+sub):(sub+'. Ikuti langkah konfigurasi di bawah.');
 }
 /* ---------- BLUETOOTH 58mm ---------- */
-let bleDevice=null,bleChar=null;
+let bleDevice=null,bleChar=null,bleReconnecting=false;
 const KNOWN_SERVICES=['000018f0-0000-1000-8000-00805f9b34fb','49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2','0000ff00-0000-1000-8000-00805f9b34fb'];
+const BLE_ID_KEY='magoji_ble_device_id';
 function updateBLEUI(){
 const ok=!!bleChar;
 $('#btDot').className='dot '+(ok?'g':'r');
 $('#btTitle').textContent=ok?('Terhubung: '+(bleDevice.name||'Printer BT')):'Belum terhubung';
 $('#btSub').textContent=ok?'Printer thermal 58mm siap mencetak':'Hubungkan printer thermal BLE (58mm)';
 }
-async function connectBLE(){
-if(!navigator.bluetooth){toast('Browser tidak mendukung Web Bluetooth. Gunakan Chrome/Edge.','err');return false;}
-try{
-bleDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:KNOWN_SERVICES});
-bleDevice.addEventListener('gattserverdisconnected',()=>{bleChar=null;updateBLEUI();toast('Printer Bluetooth terputus','err');});
-await bleDevice.gatt.connect();
+async function findWritableChar(device){
 let found=null;
 for(const suid of KNOWN_SERVICES){
-try{const svc=await bleDevice.gatt.getPrimaryService(suid);
+try{const svc=await device.gatt.getPrimaryService(suid);
 const chars=await svc.getCharacteristics();
 for(const ch of chars){if(ch.properties.write||ch.properties.writeWithoutResponse){found=ch;break;}}
 if(found)break;}catch(e){}}
-if(!found){try{const svcs=await bleDevice.gatt.getPrimaryServices();
+if(!found){try{const svcs=await device.gatt.getPrimaryServices();
 for(const s of svcs){const chs=await s.getCharacteristics();
 for(const ch of chs){if(ch.properties.write||ch.properties.writeWithoutResponse){found=ch;break;}}if(found)break;}}catch(e){}}
-bleChar=found;
-if(bleChar){toast('Printer terhubung: '+(bleDevice.name||'Bluetooth'));updateBLEUI();return true;}
+return found;
+}
+function onBleDisconnected(){
+bleChar=null;updateBLEUI();toast('Printer Bluetooth terputus, mencoba sambung ulang…','err');
+setTimeout(()=>{tryAutoReconnectBLE();},1200);
+}
+// Nyambung diam-diam ke printer yang sudah pernah diizinkan, tanpa munculkan popup pilih perangkat
+async function tryAutoReconnectBLE(){
+if(bleChar)return true;
+if(bleReconnecting)return false;
+if(!navigator.bluetooth||!navigator.bluetooth.getDevices)return false;
+const savedId=localStorage.getItem(BLE_ID_KEY);
+if(!savedId)return false;
+bleReconnecting=true;
+try{
+const devices=await navigator.bluetooth.getDevices();
+const dev=devices.find(d=>d.id===savedId);
+if(!dev){bleReconnecting=false;return false;}
+bleDevice=dev;
+bleDevice.addEventListener('gattserverdisconnected',onBleDisconnected);
+await bleDevice.gatt.connect();
+bleChar=await findWritableChar(bleDevice);
+bleReconnecting=false;
+if(bleChar){updateBLEUI();return true;}
+}catch(e){bleReconnecting=false;}
+return false;
+}
+async function connectBLE(){
+if(!navigator.bluetooth){toast('Browser tidak mendukung Web Bluetooth. Gunakan Chrome/Edge.','err');return false;}
+const reconnected=await tryAutoReconnectBLE();
+if(reconnected){toast('Printer tersambung otomatis: '+(bleDevice.name||'Bluetooth'));return true;}
+try{
+bleDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:KNOWN_SERVICES});
+bleDevice.addEventListener('gattserverdisconnected',onBleDisconnected);
+await bleDevice.gatt.connect();
+bleChar=await findWritableChar(bleDevice);
+if(bleChar){
+try{localStorage.setItem(BLE_ID_KEY,bleDevice.id);}catch(e){}
+toast('Printer terhubung: '+(bleDevice.name||'Bluetooth'));updateBLEUI();return true;
+}
 toast('Karakteristik tulis printer tidak ditemukan','err');
 }catch(e){if(!(e.message||'').toLowerCase().includes('cancel'))toast('Gagal terhubung: '+e.message,'err');}
 updateBLEUI();return false;
@@ -1497,7 +1546,10 @@ await new Promise(r=>setTimeout(r,25));
 let lastReceiptTx=null;
 async function printBT(){
 const tx=lastReceiptTx;if(!tx)return;
-if(!bleChar){const ok=await connectBLE();if(!ok)return;}
+if(!bleChar){
+const ok=await tryAutoReconnectBLE()||await connectBLE();
+if(!ok)return;
+}
 try{await bleSend(buildEscpos(tx));toast('Struk dikirim ke printer 58mm 🖨');}
 catch(e){toast('Gagal mencetak: '+e.message,'err');bleChar=null;updateBLEUI();}
 }
@@ -1604,6 +1656,7 @@ $('#dapurQueueCnt').textContent=dapurQueueItems.length?('('+belum+' sedang dipro
 $('#dapurQueueList').innerHTML=dapurQueueItems.map(o=>{
 const done=o.status==='selesai';
 const itemsTxt=(o.items||[]).map(i=>i.name+(i.variantName?' ('+i.variantName+')':'')+' x'+i.qty).join(', ');
+const panggilBtn=(done&&o.customerName)?`<button class="btn btn-sm" data-panggil="${o.id}" style="margin-top:6px;width:100%;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border:none">📢 Panggil Nama</button>`:'';
 const waBtn=(done&&o.phone)?`<button class="btn btn-wa btn-sm" data-wa="${o.id}" style="margin-top:6px;width:100%">${ic('wa',13)}Kirim WA</button>`:'';
 const manualBtn=!done?`<button class="btn btn-ghost btn-sm" data-manual-done="${o.id}" style="margin-top:6px;width:100%;font-size:11px">Tandai Selesai (manual)</button>`:'';
 return `<div style="min-width:180px;max-width:200px;flex:0 0 auto;border-radius:12px;padding:10px;background:${done?'#ecfdf5':'#fef2f2'};border:1px solid ${done?'#a7f3d0':'#fecaca'}">
@@ -1614,7 +1667,7 @@ return `<div style="min-width:180px;max-width:200px;flex:0 0 auto;border-radius:
 <div style="font-size:11px;color:var(--muted);margin:4px 0">${esc(itemsTxt||'-')}</div>
 ${o.customerName?`<div style="font-size:11px;font-weight:700">${esc(o.customerName)}</div>`:''}
 <div style="font-size:10.5px;color:${done?'#059669':'#dc2626'};font-weight:700;margin-top:2px">${done?'Selesai':'Sedang Disiapkan'}</div>
-${waBtn}${manualBtn}
+${panggilBtn}${waBtn}${manualBtn}
 </div>`;
 }).join('');
 }
@@ -1633,15 +1686,28 @@ return next;
 });
 await db.collection('antrian_dapur').add({
 queueNo,invoice:tx.invoice,txId:tx.id,date:dayKey,
-items:tx.kitchenItems,customerName:tx.queueCustomerName||'',phone:tx.queuePhone||null,
+items:tx.kitchenItems,customerName:tx.queueCustomerName||'',phone:tx.queuePhone||null,waitMode:tx.queueWaitMode||'tunggu',
 status:'diproses',createdAt:firebase.firestore.FieldValue.serverTimestamp()});
 tx.queueNumber=queueNo;tx.queueSent=true;
 $('#kirimDapurRow').style.display='none';
 toast('Terkirim ke dapur • Nomor antrian '+queueNo);
 }catch(e){console.warn('Gagal kirim ke dapur:',e);toast('Gagal kirim ke dapur, coba lagi','err');btn.disabled=false;btn.textContent='Kirim ke Dapur';}
 });
+function panggilNamaPelanggan(o){
+if(!('speechSynthesis' in window)){toast('Perangkat/browser ini tidak mendukung suara panggilan','err');return;}
+const text=`Pesanan atas nama kak ${o.customerName||'Pelanggan'}, nomor antrian ${o.queueNo}, sudah selesai`;
+const utter=new SpeechSynthesisUtterance(text);
+utter.lang='id-ID';utter.rate=0.92;utter.pitch=1;
+const voices=speechSynthesis.getVoices();
+const idVoice=voices.find(v=>v.lang&&v.lang.toLowerCase().startsWith('id'));
+if(idVoice)utter.voice=idVoice;
+speechSynthesis.cancel();speechSynthesis.speak(utter);
+toast('Memanggil nomor antrian #'+o.queueNo);
+}
 $('#dapurFab').addEventListener('click',()=>openModal('dapurModal'));
 $('#dapurQueueList').addEventListener('click',e=>{
+const panggilBtn=e.target.closest('[data-panggil]');
+if(panggilBtn){const o=dapurQueueItems.find(x=>x.id===panggilBtn.dataset.panggil);if(o)panggilNamaPelanggan(o);return;}
 const manualBtn=e.target.closest('[data-manual-done]');
 if(manualBtn){
 if(!db){toast('Tidak ada koneksi database','err');return;}
@@ -1654,7 +1720,7 @@ const b=e.target.closest('[data-wa]');if(!b)return;
 const o=dapurQueueItems.find(x=>x.id===b.dataset.wa);if(!o||!o.phone)return;
 const tpl=(state.settings.waSelesai||'').trim()||'Halo Kak {nama}, pesanan #{antrian} sudah siap diambil ya! 🥰';
 const msg=tpl.replace(/\{nama\}/g,o.customerName||'Pelanggan').replace(/\{antrian\}/g,o.queueNo);
-window.open('https://wa.me/'+o.phone+'?text='+encodeURIComponent(msg),'_blank');
+window.open('https://api.whatsapp.com/send?phone='+o.phone+'&text='+encodeURIComponent(msg),'_blank');
 toast('Membuka WhatsApp notifikasi antrian #'+o.queueNo);
 });
 $('#btnPrintWA').addEventListener('click',()=>{
@@ -1680,7 +1746,7 @@ else{m.phone=toLocalPhone(phone);if(name)m.name=name;}
 tx.memberId=m.id;tx.memberName=m.name;
 const msg=buildWaMessage(tx,m);
 closeModal('waModal');
-window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
+window.open('https://api.whatsapp.com/send?phone='+phone+'&text='+encodeURIComponent(msg),'_blank');
 toast(isNewMember?('Member baru dibuat: '+esc(name)):'Membuka WhatsApp dengan nota elektronik…');
 $('#receiptPaper').innerHTML=receiptHTML(tx);
 markDirty(m);markDirty(tx);
@@ -2054,15 +2120,26 @@ $('#cartFab').addEventListener('click',()=>{$('#posCart').classList.add('open');
 function closeCartSheet(){$('#posCart').classList.remove('open');$('#cartBackdrop').classList.remove('show');}
 $('#cartBackdrop').addEventListener('click',closeCartSheet);
 /* ---------- PEMBAYARAN ---------- */
-let payMethod='Tunai',payPaid=0,payTotal=0;
+let payMethod='Tunai',payPaid=0,payTotal=0,payWaitMode='tunggu';
+function setWaitMode(mode){
+payWaitMode=mode;
+$('#btnWaitTunggu').style.cssText=mode==='tunggu'?'flex:1;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-2)':'flex:1';
+$('#btnWaitJalan').style.cssText=mode==='jalan'?'flex:1;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-2)':'flex:1';
+$('#payPhoneField').style.display=mode==='jalan'?'block':'none';
+}
+$('#btnWaitTunggu').addEventListener('click',()=>setWaitMode('tunggu'));
+$('#btnWaitJalan').addEventListener('click',()=>setWaitMode('jalan'));
 function openPayment(){
 const c=computeCart();if(!c.lines.length)return;
 payTotal=c.total;payMethod='Tunai';payPaid=0;
 $$('.method-tab').forEach(t=>t.classList.toggle('active',t.dataset.method==='Tunai'));
 $('#payInput').value='';
 const hasDapurItems=c.lines.some(l=>{const p=productById(l.id);return p&&p.perluDapur;});
-$('#payPhoneField').style.display=(hasDapurItems&&!cart.memberId)?'block':'none';
-$('#payPhone').value='';
+$('#payCustField').style.display=hasDapurItems?'block':'none';
+$('#payWaitModeField').style.display=hasDapurItems?'block':'none';
+$('#payCustName').value=c.member?c.member.name:'';
+setWaitMode('tunggu');
+$('#payPhone').value=c.member?(c.member.phone||''):'';
 $('#quickCash').innerHTML=[['Uang Pas','exact'],[rupiah(20000),20000],[rupiah(50000),50000],[rupiah(100000),100000],[rupiah(200000),200000],[rupiah(500000),500000]]
 .map(([l,v])=>`<button data-v="${v}">${l}</button>`).join('');
 updatePayUI();openModal('paymentModal');setTimeout(()=>$('#payInput').focus(),80);
@@ -2090,6 +2167,8 @@ $('#btnConfirmPay').disabled=payPaid<payTotal;
 $('#btnConfirmPay').addEventListener('click',()=>{
 if(payPaid<payTotal){toast('Uang diterima kurang','err');return;}
 const c=computeCart();if(!c.lines.length){toast('Keranjang kosong','err');return;}
+const hasDapurItemsChk=c.lines.some(l=>{const p=productById(l.id);return p&&p.perluDapur;});
+if(hasDapurItemsChk&&!($('#payCustName').value||'').trim()){toast('Nama pelanggan wajib diisi untuk pesanan dapur','err');$('#payCustName').focus();return;}
 const tx={id:'TRX'+uid(),invoice:'INV-'+ymd(new Date())+'-'+String(state.transactions.length+1).padStart(3,'0'),
 date:new Date().toISOString(),
 items:c.lines.map(l=>({id:l.id,name:l.name,price:l.price,cost:l.cost,qty:l.qty,variantName:l.variantName||null,toppings:(l.toppings||[]).map(t=>({name:t.name,priceAdd:t.priceAdd||0})),notes:l.notes||''})),
@@ -2100,10 +2179,11 @@ memberId:cart.memberId||null,memberName:c.member?c.member.name:null,
 cashier:currentUser?currentUser.name:(state.settings.cashier||'Kasir'),pointsEarned:0,shiftId:state.currentShiftId||null};
 const kitchenLines=c.lines.filter(l=>{const p=productById(l.id);return p&&p.perluDapur;});
 if(kitchenLines.length){
-const phoneRaw=c.member?(c.member.phone||''):($('#payPhone').value||'');
+const phoneRaw=payWaitMode==='jalan'?($('#payPhone').value||''):'';
 tx.kitchenItems=kitchenLines.map(l=>({name:l.name,qty:l.qty,variantName:l.variantName||null,notes:l.notes||''}));
 tx.queuePhone=normalizeWa(phoneRaw)||null;
-tx.queueCustomerName=c.member?c.member.name:'';
+tx.queueCustomerName=($('#payCustName').value||'').trim()||(c.member?c.member.name:'');
+tx.queueWaitMode=payWaitMode;
 tx.queueSent=false;
 }
 c.lines.forEach(l=>{const p=productById(l.id);if(p&&hasStockLimit(p)){p.stock=Math.max(0,p.stock-l.qty);markDirty(p);}});
@@ -3508,6 +3588,7 @@ window.addEventListener('online',()=>{updateStatus();toast('Koneksi kembali onli
 window.addEventListener('offline',()=>{updateStatus();toast('Mode offline — data disimpan lokal','err');});
 mountIcons();updateBLEUI();renderLogin();updateStatus();
 startDapurQueueListener();
+tryAutoReconnectBLE(); // coba sambung diam-diam ke printer BT yang sudah pernah diizinkan
 const sid=localStorage.getItem('magoji_session');
 const sUser=sid?userById(sid):null;
 if(sUser)enterApp(sUser);
