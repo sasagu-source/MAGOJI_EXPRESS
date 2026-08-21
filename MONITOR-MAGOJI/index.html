@@ -69,18 +69,18 @@ dbg.textContent='⚠️ Gagal memuat antrian. Error: '+(err.message||err.code||e
 });
 }
 
-function render(orders){
+function render(allOrders){
+const orders=allOrders.filter(o=>o.status!=='selesai');
 if(!orders.length){grid.innerHTML='<div class="empty">✅ Belum ada pesanan aktif.</div>';return;}
 grid.innerHTML=orders.map(o=>{
-const done=o.status==='selesai';
 const itemsHtml=(o.items||[]).map(i=>`${esc(i.name)}${i.variantName?' ('+esc(i.variantName)+')':''} <b>x${i.qty}</b>`).join('<br>');
 const notesHtml=(o.items||[]).filter(i=>i.notes).map(i=>`📝 ${esc(i.notes)}`).join('<br>');
-return `<div class="card ${done?'done':'wait'}">
+return `<div class="card wait">
 <div class="qno">#${o.queueNo}</div>
-<div class="status">${done?'✅ Selesai':'⏳ Sedang Disiapkan'}</div>
+<div class="status">⏳ Sedang Disiapkan</div>
 <div class="items">${itemsHtml||'-'}</div>
 ${notesHtml?`<div class="note">${notesHtml}</div>`:''}
-${!done?`<button class="done-btn" data-id="${o.id}">Tandai Selesai</button>`:''}
+<button class="done-btn" data-id="${o.id}">Tandai Selesai</button>
 </div>`;
 }).join('');
 }
