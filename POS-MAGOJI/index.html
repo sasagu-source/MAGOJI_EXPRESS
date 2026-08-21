@@ -1679,6 +1679,14 @@ ${panggilBtn}${waBtn}${manualBtn}
 </div>`;
 }).join('');
 }
+// Bungkus promise dengan batas waktu — supaya kalau koneksi lemot/nyangkut, tombol nggak
+// "macet" disabled selamanya. Setelah batas waktu lewat, kita anggap gagal & kasih tahu kasir.
+function withTimeout(promise,ms,label){
+return Promise.race([
+promise,
+new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout:'+(label||''))),ms))
+]);
+}
 $('#btnKirimDapur').addEventListener('click',async ()=>{
 const tx=lastReceiptTx;if(!tx||!tx.kitchenItems||!tx.kitchenItems.length)return;
 if(!db||!navigator.onLine){toast('Tidak bisa kirim ke dapur — offline','err');return;}
@@ -1686,47 +1694,99 @@ const btn=$('#btnKirimDapur');btn.disabled=true;btn.textContent='Mengirim…';
 try{
 const dayKey=ymd(new Date());
 const counterRef=db.collection('counters').doc('antrian_'+dayKey);
-const queueNo=await db.runTransaction(async t=>{
+const queueNo=await withTimeout(db.runTransaction(async t=>{
 const snap=await t.get(counterRef);
 const next=(snap.exists?(snap.data().next||0):0)+1;
 t.set(counterRef,{next},{merge:true});
 return next;
-});
-await db.collection('antrian_dapur').add({
+}),10000,'counter');
+await withTimeout(db.collection('antrian_dapur').add({
 queueNo,invoice:tx.invoice,txId:tx.id,date:dayKey,
 items:tx.kitchenItems,customerName:tx.queueCustomerName||'',phone:tx.queuePhone||null,waitMode:tx.queueWaitMode||'tunggu',
-status:'diproses',createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+status:'diproses',createdAt:firebase.firestore.FieldValue.serverTimestamp()}),10000,'add');
 tx.queueNumber=queueNo;tx.queueSent=true;
 $('#kirimDapurRow').style.display='none';
 toast('Terkirim ke dapur • Nomor antrian '+queueNo);
-}catch(e){console.warn('Gagal kirim ke dapur:',e);toast('Gagal kirim ke dapur, coba lagi','err');btn.disabled=false;btn.textContent='Kirim ke Dapur';}
+}catch(e){
+console.warn('Gagal kirim ke dapur:',e);
+const habisWaktu=e&&/^timeout:/.test(e.message||'');
+toast(habisWaktu?'Koneksi lambat/terputus — kirim ke dapur dibatalkan, cek internet lalu coba lagi':'Gagal kirim ke dapur, coba lagi','err');
+btn.disabled=false;btn.textContent='Kirim ke Dapur';
+}
 });
 // Chrome punya bug lama: kalau tab dibiarkan idle beberapa saat, speechSynthesis "macet" diam-diam
 // (speak() dipanggil tapi nggak keluar suara sama sekali, tanpa error). Kasir POS ini kan nunggu
 // pesanan lama-lama sebelum manggil nama, jadi kena persis kasus ini. Fix: jaga speechSynthesis tetap
 // "hidup" pakai pause+resume berkala, dan pastikan daftar suara sudah termuat sebelum bicara.
+// CATATAN LINTAS BROWSER (Edge/Firefox): dua browser ini punya kebiasaan beda dari Chrome —
+// (a) objek SpeechSynthesisUtterance gampang "dibuang" (garbage-collected) sebelum sempat bicara
+//     kalau tidak disimpan di variabel luar fungsi,
+// (b) memanggil speak() persis sebaris dengan cancel() kadang "ditelan" tanpa suara & tanpa error,
+// (c) trik pause()/resume() tiap beberapa detik bisa malah memutus ucapan yang sedang jalan.
+// Makanya di bawah ini: utterance disimpan di variabel modul, ada jeda kecil setelah cancel(),
+// dan keep-alive cuma jalan kalau memang sedang tidak ada suara yang diputar.
 let ttsKeepAliveStarted=false;
+let currentUtter=null;
 function startTtsKeepAlive(){
 if(ttsKeepAliveStarted||!('speechSynthesis' in window))return;
 ttsKeepAliveStarted=true;
-setInterval(()=>{try{speechSynthesis.pause();speechSynthesis.resume();}catch(e){}},9000);
+setInterval(()=>{
+try{
+if(!speechSynthesis.speaking&&!speechSynthesis.pending){speechSynthesis.pause();speechSynthesis.resume();}
+}catch(e){}
+},9000);
 }
-function getIdVoice(){return speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('id'));}
+function getIdVoice(){try{return speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('id'));}catch(e){return null;}}
 function speakPanggilan(text,queueNo){
+speechSynthesis.cancel();
+// Jeda sedikit setelah cancel() — di Edge/Firefox, speak() yang langsung menempel di baris
+// yang sama dengan cancel() kadang tidak keluar suara sama sekali.
+setTimeout(()=>{
 const utter=new SpeechSynthesisUtterance(text);
+currentUtter=utter; // simpan referensi biar tidak di-GC sebelum selesai bicara (bug lama Edge/Firefox)
 utter.lang='id-ID';utter.rate=0.92;utter.pitch=1;utter.volume=1;
 const idVoice=getIdVoice();
 if(idVoice)utter.voice=idVoice;
 utter.onerror=()=>toast('Suara panggilan gagal diputar, coba klik sekali lagi','err');
-speechSynthesis.cancel();
-speechSynthesis.resume();
+utter.onend=()=>{if(currentUtter===utter)currentUtter=null;};
 speechSynthesis.speak(utter);
 toast('Memanggil nomor antrian #'+queueNo);
+// Kalau ternyata browser diam2 tetap tidak bersuara (mis. paket suara Bahasa Indonesia belum
+// terpasang di Windows/Edge), kasih tahu kasir alih-alih diam saja.
+setTimeout(()=>{
+if(currentUtter===utter&&!speechSynthesis.speaking){
+toast('Tidak keluar suara? Pastikan paket suara Text-to-Speech Bahasa Indonesia sudah terpasang di pengaturan Windows/browser','err');
+}
+},700);
+},80);
+}
+// Suara "cengkling" 3 nada pendek khas mesin antrian rumah sakit/bank, dibunyikan sebelum TTS
+// memanggil nama — dibuat langsung pakai Web Audio API (osilator), jadi tidak perlu file suara.
+function playQueueChime(){
+try{
+const ctx=new(window.AudioContext||window.webkitAudioContext)();
+const notes=[1046.50,1318.51,1567.98]; // do-mi-sol oktaf tinggi, mirip nada "ting-ting-tung" antrian
+let last=0;
+notes.forEach((freq,i)=>{
+const t0=ctx.currentTime+i*0.16;
+const o=ctx.createOscillator(),g=ctx.createGain();
+o.type='sine';o.frequency.value=freq;
+o.connect(g);g.connect(ctx.destination);
+g.gain.setValueAtTime(0,t0);
+g.gain.linearRampToValueAtTime(0.35,t0+0.02);
+g.gain.exponentialRampToValueAtTime(0.001,t0+0.5);
+o.start(t0);o.stop(t0+0.55);
+last=i*0.16+0.55;
+});
+return Math.round(last*1000);
+}catch(e){return 0;}
 }
 function panggilNamaPelanggan(o){
 if(!('speechSynthesis' in window)){toast('Perangkat/browser ini tidak mendukung suara panggilan','err');return;}
 startTtsKeepAlive();
 const text=`Pesanan atas nama kak ${o.customerName||'Pelanggan'}, nomor antrian ${o.queueNo}, sudah selesai`;
+const jeda=playQueueChime();
+setTimeout(()=>{
 // Kalau daftar suara belum sempat termuat (sering terjadi di percobaan pertama), tunggu event
 // voiceschanged sebentar lalu coba lagi — daripada diam tanpa suara.
 if(speechSynthesis.getVoices().length===0){
@@ -1737,6 +1797,7 @@ setTimeout(onReady,400);
 }else{
 speakPanggilan(text,o.queueNo);
 }
+},jeda);
 }
 $('#dapurFab').addEventListener('click',()=>openModal('dapurModal'));
 $('#dapurQueueList').addEventListener('click',e=>{
