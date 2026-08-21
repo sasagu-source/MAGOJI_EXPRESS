@@ -47,19 +47,16 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 
 const dot=document.getElementById('statusDot');
 const grid=document.getElementById('grid');
-let currentUnsub=null;
-let currentDayKey=null;
+let subscribed=false;
 
 function setStatus(online){dot.style.background=online?'#22c55e':'#ef4444';}
 
-function subscribeToday(){
-const key=ymd(new Date());
-if(key===currentDayKey)return;
-currentDayKey=key;
-if(currentUnsub)currentUnsub();
+function subscribeQueue(){
+if(subscribed)return;
 if(!db){grid.innerHTML='<div class="empty">⚠️ Firebase belum terhubung.</div>';setStatus(false);return;}
+subscribed=true;
 const dbg=document.getElementById('debugBar');
-currentUnsub=db.collection('antrian_dapur').where('date','==',key).onSnapshot(snap=>{
+db.collection('antrian_dapur').orderBy('createdAt','desc').limit(50).onSnapshot(snap=>{
 setStatus(true);
 dbg.style.display='none';
 const orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.queueNo||0)-(b.queueNo||0));
@@ -68,12 +65,12 @@ render(orders);
 console.warn('Gagal memantau antrian:',err);
 setStatus(false);
 dbg.style.display='block';
-dbg.textContent='⚠️ Gagal memuat antrian (tanggal dicari: '+key+'). Error: '+(err.message||err.code||err);
+dbg.textContent='⚠️ Gagal memuat antrian. Error: '+(err.message||err.code||err);
 });
 }
 
 function render(orders){
-if(!orders.length){grid.innerHTML='<div class="empty">✅ Belum ada pesanan masuk hari ini.</div>';return;}
+if(!orders.length){grid.innerHTML='<div class="empty">✅ Belum ada pesanan aktif.</div>';return;}
 grid.innerHTML=orders.map(o=>{
 const done=o.status==='selesai';
 const itemsHtml=(o.items||[]).map(i=>`${esc(i.name)}${i.variantName?' ('+esc(i.variantName)+')':''} <b>x${i.qty}</b>`).join('<br>');
@@ -100,7 +97,7 @@ completedAt:firebase.firestore.FieldValue.serverTimestamp()
 function tickClock(){
 const now=new Date();
 document.getElementById('clock').textContent=now.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long'})+' • '+now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
-subscribeToday(); // re-check date rollover every tick
+subscribeQueue();
 }
 tickClock();
 setInterval(tickClock,30000);
