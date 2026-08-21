@@ -211,8 +211,10 @@ background:radial-gradient(700px 500px at 15% 20%,rgba(13,148,136,.35),transpare
 .cart-empty .big{font-size:38px;margin-bottom:6px}
 .cart-fab{display:none;position:fixed;right:16px;bottom:78px;z-index:55;align-items:center;gap:10px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;border-radius:99px;padding:13px 20px;font-weight:800;box-shadow:0 12px 28px -8px rgba(13,148,136,.65)}
 .cart-fab .cnt{background:#fff;color:var(--accent-2);border-radius:99px;padding:1px 9px;font-size:12px}
-.dapur-fab{display:none;position:fixed;right:16px;bottom:148px;z-index:55;align-items:center;gap:8px;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border:none;border-radius:99px;padding:11px 16px;font-weight:800;box-shadow:0 12px 28px -8px rgba(234,88,12,.65);cursor:pointer}
-.dapur-fab .cnt{background:#fff;color:#ea580c;border-radius:99px;padding:1px 9px;font-size:12px}
+.dapur-top-row{display:none;justify-content:flex-end;margin-top:8px}
+.dapur-top-btn{display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border:none;border-radius:99px;padding:8px 16px;font-weight:800;font-size:13px;box-shadow:0 8px 20px -6px rgba(234,88,12,.55);cursor:pointer}
+.dapur-top-btn .cnt{background:#fff;color:#ea580c;border-radius:99px;padding:1px 9px;font-size:12px}
+.dapur-top-btn .sync-warn{background:#fef3c7;color:#92400e;border-radius:99px;padding:1px 8px;font-size:10.5px;font-weight:700}
 #cartBackdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:58;display:none}
 #cartBackdrop.show{display:block}
 /* TABEL */
@@ -354,7 +356,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
 .pos-cart{position:fixed;bottom:0;left:0;right:0;top:auto;max-height:82vh;z-index:60;border-radius:22px 22px 0 0;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,1,.4,1)}
 .pos-cart.open{transform:none}
 body[data-page="kasir"] .cart-fab{display:flex}
-body[data-page="kasir"] .dapur-fab{display:flex}
 .dash-row3{grid-template-columns:1fr}.set-grid{grid-template-columns:1fr}
 .user-chip .uc-nm{display:none}
 .login-left{display:none}
@@ -499,6 +500,9 @@ cursor:not-allowed;
 <button class="icon-btn" id="btnSyncTop" title="Sinkronkan"><span class="sync-ic"></span></button>
 <div class="user-chip"><div class="user-ava" id="userAva">K</div><span class="uc-nm" id="userName">—</span><span id="userRoleBadge"></span></div>
 <button class="icon-btn" id="btnLogout" title="Keluar" style="color:var(--rose)"></button>
+</div>
+<div class="dapur-top-row" id="dapurTopRow">
+<button class="dapur-top-btn" id="dapurFab"><span data-ic="clock"></span>Antrian Dapur<span class="cnt" id="dapurFabCount">0</span><span class="sync-warn" id="dapurSyncWarn" style="display:none">Belum tersinkron</span></button>
 </div>
 </header>
 <main>
@@ -718,7 +722,6 @@ Status: Terhubung & Aktif (project terpisah dari POS Sasagu)</div>
 </div>
 <nav class="bottomnav" id="bottomNav"></nav>
 <button class="cart-fab" id="cartFab"><span id="fabIc"></span><span class="cnt" id="fabCount">0</span><span id="fabTotal">Rp 0</span></button>
-<button class="dapur-fab" id="dapurFab"><span data-ic="clock"></span>Antrian Dapur<span class="cnt" id="dapurFabCount">0</span></button>
 <div id="cartBackdrop"></div>
 <div class="sheet-overlay" id="moreSheet"><div class="sheet"><div class="grab"></div><div id="sheetList"></div></div></div>
 <!-- MODAL: EDIT SLOT QRIS -->
@@ -1582,24 +1585,28 @@ $('#waPreview').value=buildWaMessage(tx,{name:nm,points:0});
 }
 /* ---------- ANTRIAN DAPUR (real-time) ---------- */
 let dapurQueueItems=[];
+let dapurQueuePending=false;
 function startDapurQueueListener(){
 if(!db)return;
 const todayKey=ymd(new Date());
-db.collection('antrian_dapur').where('date','==',todayKey).onSnapshot(snap=>{
+db.collection('antrian_dapur').where('date','==',todayKey).onSnapshot({includeMetadataChanges:true},snap=>{
 dapurQueueItems=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.queueNo||0)-(b.queueNo||0));
+dapurQueuePending=snap.metadata.hasPendingWrites;
 renderDapurQueuePanel();
 },err=>console.warn('Gagal memantau antrian dapur:',err));
 }
 function renderDapurQueuePanel(){
-const fab=$('#dapurFab');if(!fab)return;
+const row=$('#dapurTopRow');if(!row)return;
 const belum=dapurQueueItems.filter(o=>o.status!=='selesai').length;
-fab.style.display=dapurQueueItems.length?'flex':'none';
+row.style.display=dapurQueueItems.length?'flex':'none';
 $('#dapurFabCount').textContent=belum;
+$('#dapurSyncWarn').style.display=dapurQueuePending?'inline-block':'none';
 $('#dapurQueueCnt').textContent=dapurQueueItems.length?('('+belum+' sedang diproses)'):'';
 $('#dapurQueueList').innerHTML=dapurQueueItems.map(o=>{
 const done=o.status==='selesai';
 const itemsTxt=(o.items||[]).map(i=>i.name+(i.variantName?' ('+i.variantName+')':'')+' x'+i.qty).join(', ');
 const waBtn=(done&&o.phone)?`<button class="btn btn-wa btn-sm" data-wa="${o.id}" style="margin-top:6px;width:100%">${ic('wa',13)}Kirim WA</button>`:'';
+const manualBtn=!done?`<button class="btn btn-ghost btn-sm" data-manual-done="${o.id}" style="margin-top:6px;width:100%;font-size:11px">Tandai Selesai (manual)</button>`:'';
 return `<div style="min-width:180px;max-width:200px;flex:0 0 auto;border-radius:12px;padding:10px;background:${done?'#ecfdf5':'#fef2f2'};border:1px solid ${done?'#a7f3d0':'#fecaca'}">
 <div style="display:flex;justify-content:space-between;align-items:center">
 <b style="font-size:18px;color:${done?'#059669':'#dc2626'}">#${o.queueNo}</b>
@@ -1608,7 +1615,7 @@ return `<div style="min-width:180px;max-width:200px;flex:0 0 auto;border-radius:
 <div style="font-size:11px;color:var(--muted);margin:4px 0">${esc(itemsTxt||'-')}</div>
 ${o.customerName?`<div style="font-size:11px;font-weight:700">${esc(o.customerName)}</div>`:''}
 <div style="font-size:10.5px;color:${done?'#059669':'#dc2626'};font-weight:700;margin-top:2px">${done?'Selesai':'Sedang Disiapkan'}</div>
-${waBtn}
+${waBtn}${manualBtn}
 </div>`;
 }).join('');
 }
@@ -1636,6 +1643,14 @@ toast('Terkirim ke dapur • Nomor antrian '+queueNo);
 });
 $('#dapurFab').addEventListener('click',()=>openModal('dapurModal'));
 $('#dapurQueueList').addEventListener('click',e=>{
+const manualBtn=e.target.closest('[data-manual-done]');
+if(manualBtn){
+if(!db){toast('Tidak ada koneksi database','err');return;}
+manualBtn.disabled=true;manualBtn.textContent='Menyimpan…';
+db.collection('antrian_dapur').doc(manualBtn.dataset.manualDone).update({status:'selesai',completedAt:firebase.firestore.FieldValue.serverTimestamp(),completedBy:'kasir-manual'})
+.catch(err=>{console.warn('Gagal tandai selesai manual:',err);toast('Gagal menandai selesai','err');manualBtn.disabled=false;manualBtn.textContent='Tandai Selesai (manual)';});
+return;
+}
 const b=e.target.closest('[data-wa]');if(!b)return;
 const o=dapurQueueItems.find(x=>x.id===b.dataset.wa);if(!o||!o.phone)return;
 const tpl=(state.settings.waSelesai||'').trim()||'Halo Kak {nama}, pesanan #{antrian} sudah siap diambil ya! 🥰';
