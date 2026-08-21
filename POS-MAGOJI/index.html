@@ -1577,6 +1577,14 @@ toast('Gagal: '+e.message,'err');
 });
 $('#btnPrintBT').addEventListener('click',printBT);
 /* ---------- WHATSAPP ---------- */
+function openWaChat(phone,msg){
+// Buka tab kosong DULU (instan, tanpa nunggu apa-apa) baru diarahkan ke link WA.
+// Ini bikin terasa langsung terbuka, nggak ada jeda "loading" sebelum tab muncul,
+// dan juga menghindari pop-up blocker karena window.open dipanggil paling awal & sinkron.
+const win=window.open('','_blank');
+const url='https://api.whatsapp.com/send?phone='+phone+'&text='+encodeURIComponent(msg);
+if(win){win.location.href=url;}else{window.open(url,'_blank');}
+}
 function normalizeWa(raw){let d=String(raw||'').replace(/\D/g,'');
 if(d.startsWith('62')){}
 else if(d.startsWith('0'))d='62'+d.slice(1);
@@ -1693,16 +1701,42 @@ $('#kirimDapurRow').style.display='none';
 toast('Terkirim ke dapur • Nomor antrian '+queueNo);
 }catch(e){console.warn('Gagal kirim ke dapur:',e);toast('Gagal kirim ke dapur, coba lagi','err');btn.disabled=false;btn.textContent='Kirim ke Dapur';}
 });
+// Chrome punya bug lama: kalau tab dibiarkan idle beberapa saat, speechSynthesis "macet" diam-diam
+// (speak() dipanggil tapi nggak keluar suara sama sekali, tanpa error). Kasir POS ini kan nunggu
+// pesanan lama-lama sebelum manggil nama, jadi kena persis kasus ini. Fix: jaga speechSynthesis tetap
+// "hidup" pakai pause+resume berkala, dan pastikan daftar suara sudah termuat sebelum bicara.
+let ttsKeepAliveStarted=false;
+function startTtsKeepAlive(){
+if(ttsKeepAliveStarted||!('speechSynthesis' in window))return;
+ttsKeepAliveStarted=true;
+setInterval(()=>{try{speechSynthesis.pause();speechSynthesis.resume();}catch(e){}},9000);
+}
+function getIdVoice(){return speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('id'));}
+function speakPanggilan(text,queueNo){
+const utter=new SpeechSynthesisUtterance(text);
+utter.lang='id-ID';utter.rate=0.92;utter.pitch=1;utter.volume=1;
+const idVoice=getIdVoice();
+if(idVoice)utter.voice=idVoice;
+utter.onerror=()=>toast('Suara panggilan gagal diputar, coba klik sekali lagi','err');
+speechSynthesis.cancel();
+speechSynthesis.resume();
+speechSynthesis.speak(utter);
+toast('Memanggil nomor antrian #'+queueNo);
+}
 function panggilNamaPelanggan(o){
 if(!('speechSynthesis' in window)){toast('Perangkat/browser ini tidak mendukung suara panggilan','err');return;}
+startTtsKeepAlive();
 const text=`Pesanan atas nama kak ${o.customerName||'Pelanggan'}, nomor antrian ${o.queueNo}, sudah selesai`;
-const utter=new SpeechSynthesisUtterance(text);
-utter.lang='id-ID';utter.rate=0.92;utter.pitch=1;
-const voices=speechSynthesis.getVoices();
-const idVoice=voices.find(v=>v.lang&&v.lang.toLowerCase().startsWith('id'));
-if(idVoice)utter.voice=idVoice;
-speechSynthesis.cancel();speechSynthesis.speak(utter);
-toast('Memanggil nomor antrian #'+o.queueNo);
+// Kalau daftar suara belum sempat termuat (sering terjadi di percobaan pertama), tunggu event
+// voiceschanged sebentar lalu coba lagi — daripada diam tanpa suara.
+if(speechSynthesis.getVoices().length===0){
+let done=false;
+const onReady=()=>{if(done)return;done=true;speechSynthesis.onvoiceschanged=null;speakPanggilan(text,o.queueNo);};
+speechSynthesis.onvoiceschanged=onReady;
+setTimeout(onReady,400);
+}else{
+speakPanggilan(text,o.queueNo);
+}
 }
 $('#dapurFab').addEventListener('click',()=>openModal('dapurModal'));
 $('#dapurQueueList').addEventListener('click',e=>{
@@ -1720,14 +1754,31 @@ const b=e.target.closest('[data-wa]');if(!b)return;
 const o=dapurQueueItems.find(x=>x.id===b.dataset.wa);if(!o||!o.phone)return;
 const tpl=(state.settings.waSelesai||'').trim()||'Halo Kak {nama}, pesanan #{antrian} sudah siap diambil ya! 🥰';
 const msg=tpl.replace(/\{nama\}/g,o.customerName||'Pelanggan').replace(/\{antrian\}/g,o.queueNo);
-window.open('https://api.whatsapp.com/send?phone='+o.phone+'&text='+encodeURIComponent(msg),'_blank');
+openWaChat(o.phone,msg);
 toast('Membuka WhatsApp notifikasi antrian #'+o.queueNo);
 });
 $('#btnPrintWA').addEventListener('click',()=>{
 const tx=lastReceiptTx;if(!tx)return;
 const m=tx.memberId?memberById(tx.memberId):null;
-$('#waName').value=m?m.name:(tx.memberName||'');
-$('#waPhone').value=m?(m.phone||''):'';
+// Ambil nomor & nama yang SUDAH diinput sebelumnya (saat pilih member, atau saat checkout
+// "sambil jalan" tadi) — supaya kasir nggak perlu ketik ulang nama & no HP di sini.
+const knownPhone=normalizeWa((m&&m.phone)||tx.queuePhone||'');
+const knownName=(m&&m.name)||tx.queueCustomerName||tx.memberName||'';
+if(knownPhone){
+let sendM=m;
+if(!sendM)sendM=state.members.find(x=>normalizeWa(x.phone)===knownPhone);
+if(!sendM)sendM={name:knownName||'Pelanggan'};
+if(sendM.id){tx.memberId=sendM.id;tx.memberName=sendM.name;}
+const msg=buildWaMessage(tx,sendM);
+openWaChat(knownPhone,msg);
+toast('Membuka WhatsApp dengan nota elektronik…');
+markDirty(tx);if(db&&navigator.onLine)syncNow();
+return;
+}
+// Fallback: transaksi ini memang belum punya nomor HP tersimpan sama sekali (bukan member,
+// bukan pesanan dapur "sambil jalan") — baru di sini kasir diminta isi sekali.
+$('#waName').value=knownName;
+$('#waPhone').value='';
 updateWaPreview();openModal('waModal');
 });
 $('#waName').addEventListener('input',updateWaPreview);
@@ -1746,7 +1797,7 @@ else{m.phone=toLocalPhone(phone);if(name)m.name=name;}
 tx.memberId=m.id;tx.memberName=m.name;
 const msg=buildWaMessage(tx,m);
 closeModal('waModal');
-window.open('https://api.whatsapp.com/send?phone='+phone+'&text='+encodeURIComponent(msg),'_blank');
+openWaChat(phone,msg);
 toast(isNewMember?('Member baru dibuat: '+esc(name)):'Membuka WhatsApp dengan nota elektronik…');
 $('#receiptPaper').innerHTML=receiptHTML(tx);
 markDirty(m);markDirty(tx);
@@ -3227,7 +3278,7 @@ norm=normalizeWa(phone);
 if(!norm){toast('Nomor WhatsApp tidak valid','err');return;}
 }
 const msg=buildShiftWaMessage(sh);
-window.open('https://wa.me/'+norm+'?text='+encodeURIComponent(msg),'_blank');
+openWaChat(norm,msg);
 toast('Membuka WhatsApp dengan laporan shift…');
 });
 /* ---------- PENGGUNA ---------- */
@@ -3588,6 +3639,7 @@ window.addEventListener('online',()=>{updateStatus();toast('Koneksi kembali onli
 window.addEventListener('offline',()=>{updateStatus();toast('Mode offline — data disimpan lokal','err');});
 mountIcons();updateBLEUI();renderLogin();updateStatus();
 startDapurQueueListener();
+startTtsKeepAlive();
 tryAutoReconnectBLE(); // coba sambung diam-diam ke printer BT yang sudah pernah diizinkan
 const sid=localStorage.getItem('magoji_session');
 const sUser=sid?userById(sid):null;
