@@ -34,6 +34,7 @@ button.done-btn:active{background:#047857}
 <h1>🍞 DAPUR MONITOR — SASAGU</h1>
 <div><span id="statusDot"></span><span id="clock"></span></div>
 </header>
+<div id="debugBar" style="display:none;background:#7f1d1d;color:#fecaca;padding:8px 14px;border-radius:8px;font-size:12px;margin-bottom:14px"></div>
 <div class="grid" id="grid"><div class="empty">Memuat antrian…</div></div>
 
 <script>
@@ -57,11 +58,18 @@ if(key===currentDayKey)return;
 currentDayKey=key;
 if(currentUnsub)currentUnsub();
 if(!db){grid.innerHTML='<div class="empty">⚠️ Firebase belum terhubung.</div>';setStatus(false);return;}
+const dbg=document.getElementById('debugBar');
 currentUnsub=db.collection('antrian_dapur').where('date','==',key).onSnapshot(snap=>{
 setStatus(true);
+dbg.style.display='none';
 const orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.queueNo||0)-(b.queueNo||0));
 render(orders);
-},err=>{console.warn('Gagal memantau antrian:',err);setStatus(false);});
+},err=>{
+console.warn('Gagal memantau antrian:',err);
+setStatus(false);
+dbg.style.display='block';
+dbg.textContent='⚠️ Gagal memuat antrian (tanggal dicari: '+key+'). Error: '+(err.message||err.code||err);
+});
 }
 
 function render(orders){
