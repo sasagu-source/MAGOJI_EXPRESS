@@ -1673,16 +1673,17 @@ if(!name){toast('Nama pelanggan wajib diisi','err');return;}
 if(!phone){toast('No. WhatsApp tidak valid (gunakan 08xxx)','err');return;}
 let m=tx.memberId?memberById(tx.memberId):null;
 if(!m)m=state.members.find(x=>normalizeWa(x.phone)===phone);
+let isNewMember=false;
 if(!m){m={id:'M'+uid(),name,phone:toLocalPhone(phone),email:'',points:0,earnedPoints:0,totalSpent:0,txCount:0,joinedAt:new Date().toISOString()};
-state.members.push(m);toast('Member baru dibuat: '+esc(name));}
+state.members.push(m);isNewMember=true;}
 else{m.phone=toLocalPhone(phone);if(name)m.name=name;}
-markDirty(m);
-tx.memberId=m.id;tx.memberName=m.name;markDirty(tx);
+tx.memberId=m.id;tx.memberName=m.name;
 const msg=buildWaMessage(tx,m);
 closeModal('waModal');
-$('#receiptPaper').innerHTML=receiptHTML(tx);
 window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
-toast('Membuka WhatsApp dengan nota elektronik…');
+toast(isNewMember?('Member baru dibuat: '+esc(name)):'Membuka WhatsApp dengan nota elektronik…');
+$('#receiptPaper').innerHTML=receiptHTML(tx);
+markDirty(m);markDirty(tx);
 if(db&&navigator.onLine)syncNow();
 });
 /* ---------- TOAST & MODAL ---------- */
