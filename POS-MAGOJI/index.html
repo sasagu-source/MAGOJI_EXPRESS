@@ -1588,8 +1588,7 @@ let dapurQueueItems=[];
 let dapurQueuePending=false;
 function startDapurQueueListener(){
 if(!db)return;
-const todayKey=ymd(new Date());
-db.collection('antrian_dapur').where('date','==',todayKey).onSnapshot({includeMetadataChanges:true},snap=>{
+db.collection('antrian_dapur').orderBy('createdAt','desc').limit(50).onSnapshot({includeMetadataChanges:true},snap=>{
 dapurQueueItems=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.queueNo||0)-(b.queueNo||0));
 dapurQueuePending=snap.metadata.hasPendingWrites;
 renderDapurQueuePanel();
