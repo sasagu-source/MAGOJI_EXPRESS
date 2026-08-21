@@ -211,6 +211,8 @@ background:radial-gradient(700px 500px at 15% 20%,rgba(13,148,136,.35),transpare
 .cart-empty .big{font-size:38px;margin-bottom:6px}
 .cart-fab{display:none;position:fixed;right:16px;bottom:78px;z-index:55;align-items:center;gap:10px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;border-radius:99px;padding:13px 20px;font-weight:800;box-shadow:0 12px 28px -8px rgba(13,148,136,.65)}
 .cart-fab .cnt{background:#fff;color:var(--accent-2);border-radius:99px;padding:1px 9px;font-size:12px}
+.dapur-fab{display:none;position:fixed;right:16px;bottom:148px;z-index:55;align-items:center;gap:8px;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border:none;border-radius:99px;padding:11px 16px;font-weight:800;box-shadow:0 12px 28px -8px rgba(234,88,12,.65);cursor:pointer}
+.dapur-fab .cnt{background:#fff;color:#ea580c;border-radius:99px;padding:1px 9px;font-size:12px}
 #cartBackdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:58;display:none}
 #cartBackdrop.show{display:block}
 /* TABEL */
@@ -352,6 +354,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
 .pos-cart{position:fixed;bottom:0;left:0;right:0;top:auto;max-height:82vh;z-index:60;border-radius:22px 22px 0 0;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,1,.4,1)}
 .pos-cart.open{transform:none}
 body[data-page="kasir"] .cart-fab{display:flex}
+body[data-page="kasir"] .dapur-fab{display:flex}
 .dash-row3{grid-template-columns:1fr}.set-grid{grid-template-columns:1fr}
 .user-chip .uc-nm{display:none}
 .login-left{display:none}
@@ -516,10 +519,6 @@ cursor:not-allowed;
 <div>
 <div class="pos-tools">
 <div class="search-box"><span id="icSearch1"></span><input class="input" id="posSearch" placeholder="Cari nama produk atau SKU…"></div>
-</div>
-<div class="card" id="dapurQueuePanel" style="margin-bottom:12px;display:none">
-<h3><span data-ic="clock"></span>Antrian Dapur <span class="cnt" id="dapurQueueCnt"></span></h3>
-<div id="dapurQueueList" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px"></div>
 </div>
 <div class="chips" id="posCats"></div>
 <div class="promo-strip" id="posPromoStrip"></div>
@@ -719,6 +718,7 @@ Status: Terhubung & Aktif (project terpisah dari POS Sasagu)</div>
 </div>
 <nav class="bottomnav" id="bottomNav"></nav>
 <button class="cart-fab" id="cartFab"><span id="fabIc"></span><span class="cnt" id="fabCount">0</span><span id="fabTotal">Rp 0</span></button>
+<button class="dapur-fab" id="dapurFab"><span data-ic="clock"></span>Antrian Dapur<span class="cnt" id="dapurFabCount">0</span></button>
 <div id="cartBackdrop"></div>
 <div class="sheet-overlay" id="moreSheet"><div class="sheet"><div class="grab"></div><div id="sheetList"></div></div></div>
 <!-- MODAL: EDIT SLOT QRIS -->
@@ -1027,12 +1027,21 @@ Produk ini punya variasi ukuran
 <div class="modal-overlay" id="receiptModal"><div class="modal sm">
 <div class="modal-head no-print"><b>Struk Transaksi</b><button class="x-btn" data-close="receiptModal"><span data-ic="x"></span></button></div>
 <div class="modal-body" id="receiptPaper"></div>
+<div class="modal-foot no-print" id="kirimDapurRow" style="display:none">
+<button class="btn btn-primary" id="btnKirimDapur" style="width:100%;background:linear-gradient(135deg,#f97316,#ea580c)"><span data-ic="clock"></span>Kirim ke Dapur</button>
+</div>
 <div class="modal-foot no-print">
 <button class="btn btn-ghost" data-close="receiptModal">Tutup</button>
 <button class="btn btn-wa" id="btnPrintWA"><span data-ic="wa"></span>WA</button>
 <button class="btn btn-ghost" id="btnPrintBT" style="color:var(--indigo)"><span data-ic="bluetooth"></span>BT 58mm</button>
 <button class="btn btn-primary" id="btnPrint"><span data-ic="printer"></span>Cetak</button>
 </div>
+</div></div>
+<!-- MODAL: ANTRIAN DAPUR -->
+<div class="modal-overlay" id="dapurModal"><div class="modal">
+<div class="modal-head"><b>Antrian Dapur <span class="cnt" id="dapurQueueCnt"></span></b><button class="x-btn" data-close="dapurModal"><span data-ic="x"></span></button></div>
+<div class="modal-body"><div id="dapurQueueList" style="display:flex;flex-wrap:wrap;gap:10px"></div></div>
+<div class="modal-foot"><button class="btn btn-ghost" data-close="dapurModal">Tutup</button></div>
 </div></div>
 <!-- MODAL: KIRIM WA -->
 <div class="modal-overlay" id="waModal"><div class="modal">
@@ -1534,7 +1543,7 @@ L.push('====================');
 L.push(`🧾 ${tx.invoice}`);
 L.push(`📅 ${fmtD(tx.date)} • ${fmtT(tx.date)}`);
 L.push(`🙋 Kasir: ${tx.cashier||'-'}`);
-if(tx.queueNumber)L.push(`🎫 Nomor Antrian: *${tx.queueNumber}*`);
+if(tx.queueNumber)L.push(`No. antrian: ${tx.queueNumber}`);
 L.push('--------------------');
 
 tx.items.forEach(i=>{
@@ -1582,11 +1591,11 @@ renderDapurQueuePanel();
 },err=>console.warn('Gagal memantau antrian dapur:',err));
 }
 function renderDapurQueuePanel(){
-const panel=$('#dapurQueuePanel');if(!panel)return;
-if(!dapurQueueItems.length){panel.style.display='none';return;}
-panel.style.display='block';
+const fab=$('#dapurFab');if(!fab)return;
 const belum=dapurQueueItems.filter(o=>o.status!=='selesai').length;
-$('#dapurQueueCnt').textContent=belum+' sedang diproses';
+fab.style.display=dapurQueueItems.length?'flex':'none';
+$('#dapurFabCount').textContent=belum;
+$('#dapurQueueCnt').textContent=dapurQueueItems.length?('('+belum+' sedang diproses)'):'';
 $('#dapurQueueList').innerHTML=dapurQueueItems.map(o=>{
 const done=o.status==='selesai';
 const itemsTxt=(o.items||[]).map(i=>i.name+(i.variantName?' ('+i.variantName+')':'')+' x'+i.qty).join(', ');
@@ -1603,6 +1612,29 @@ ${waBtn}
 </div>`;
 }).join('');
 }
+$('#btnKirimDapur').addEventListener('click',async ()=>{
+const tx=lastReceiptTx;if(!tx||!tx.kitchenItems||!tx.kitchenItems.length)return;
+if(!db||!navigator.onLine){toast('Tidak bisa kirim ke dapur — offline','err');return;}
+const btn=$('#btnKirimDapur');btn.disabled=true;btn.textContent='Mengirim…';
+try{
+const dayKey=ymd(new Date());
+const counterRef=db.collection('counters').doc('antrian_'+dayKey);
+const queueNo=await db.runTransaction(async t=>{
+const snap=await t.get(counterRef);
+const next=(snap.exists?(snap.data().next||0):0)+1;
+t.set(counterRef,{next},{merge:true});
+return next;
+});
+await db.collection('antrian_dapur').add({
+queueNo,invoice:tx.invoice,txId:tx.id,date:dayKey,
+items:tx.kitchenItems,customerName:tx.queueCustomerName||'',phone:tx.queuePhone||null,
+status:'diproses',createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+tx.queueNumber=queueNo;tx.queueSent=true;
+$('#kirimDapurRow').style.display='none';
+toast('Terkirim ke dapur • Nomor antrian '+queueNo);
+}catch(e){console.warn('Gagal kirim ke dapur:',e);toast('Gagal kirim ke dapur, coba lagi','err');btn.disabled=false;btn.textContent='Kirim ke Dapur';}
+});
+$('#dapurFab').addEventListener('click',()=>openModal('dapurModal'));
 $('#dapurQueueList').addEventListener('click',e=>{
 const b=e.target.closest('[data-wa]');if(!b)return;
 const o=dapurQueueItems.find(x=>x.id===b.dataset.wa);if(!o||!o.phone)return;
@@ -2040,7 +2072,7 @@ $('#payShort').textContent=change<0?'Kurang '+rupiah(-change):'Kembalian';
 $('#payChange').textContent=rupiah(Math.max(0,change));$('#payChange').classList.toggle('neg',change<0);
 $('#btnConfirmPay').disabled=payPaid<payTotal;
 }
-$('#btnConfirmPay').addEventListener('click',async ()=>{
+$('#btnConfirmPay').addEventListener('click',()=>{
 if(payPaid<payTotal){toast('Uang diterima kurang','err');return;}
 const c=computeCart();if(!c.lines.length){toast('Keranjang kosong','err');return;}
 const tx={id:'TRX'+uid(),invoice:'INV-'+ymd(new Date())+'-'+String(state.transactions.length+1).padStart(3,'0'),
@@ -2052,26 +2084,12 @@ total:c.total,method:payMethod,paid:payPaid,change:Math.max(0,payPaid-c.total),
 memberId:cart.memberId||null,memberName:c.member?c.member.name:null,
 cashier:currentUser?currentUser.name:(state.settings.cashier||'Kasir'),pointsEarned:0,shiftId:state.currentShiftId||null};
 const kitchenLines=c.lines.filter(l=>{const p=productById(l.id);return p&&p.perluDapur;});
-if(kitchenLines.length&&db&&navigator.onLine){
-try{
+if(kitchenLines.length){
 const phoneRaw=c.member?(c.member.phone||''):($('#payPhone').value||'');
-const phone=normalizeWa(phoneRaw)||null;
-const custName=c.member?c.member.name:'';
-const dayKey=ymd(new Date());
-const counterRef=db.collection('counters').doc('antrian_'+dayKey);
-const queueNo=await db.runTransaction(async t=>{
-const snap=await t.get(counterRef);
-const next=(snap.exists?(snap.data().next||0):0)+1;
-t.set(counterRef,{next},{merge:true});
-return next;
-});
-tx.queueNumber=queueNo;tx.queuePhone=phone;
-await db.collection('antrian_dapur').add({
-queueNo,invoice:tx.invoice,txId:tx.id,date:dayKey,
-items:kitchenLines.map(l=>({name:l.name,qty:l.qty,variantName:l.variantName||null,notes:l.notes||''})),
-customerName:custName,phone,status:'diproses',
-createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-}catch(e){console.warn('Gagal buat antrian dapur:',e);}
+tx.kitchenItems=kitchenLines.map(l=>({name:l.name,qty:l.qty,variantName:l.variantName||null,notes:l.notes||''}));
+tx.queuePhone=normalizeWa(phoneRaw)||null;
+tx.queueCustomerName=c.member?c.member.name:'';
+tx.queueSent=false;
 }
 c.lines.forEach(l=>{const p=productById(l.id);if(p&&hasStockLimit(p)){p.stock=Math.max(0,p.stock-l.qty);markDirty(p);}});
 if(c.member){tx.pointsEarned=Math.floor(c.total/10000);
@@ -2095,7 +2113,6 @@ return `<div class="r-item"><div class="r-row"><span class="nm">${esc(i.name)}</
 const discRows=(tx.discounts||[]).map(d=>`<div class="r-row" style="color:var(--rose)"><span>✂ ${esc(d.name)}</span><span>-${rupiah(d.amount)}</span></div>`).join('');
 const footerTxt=(s.receiptFooter||'').trim()||'Terima kasih telah berbelanja! 🙏';
 return `<div class="receipt"><h4>${esc(s.storeName)}</h4><div class="r-sub">${esc(s.address||'')}<br>${esc(tx.invoice)} • ${fmtD(tx.date)} ${fmtT(tx.date)}<br>Kasir: ${esc(tx.cashier||'-')}${tx.memberName?'<br>Member: '+esc(tx.memberName):''}</div>
-${tx.queueNumber?`<div class="r-sub" style="text-align:center;font-weight:800;font-size:16px;color:var(--accent)">Nomor Antrian: ${tx.queueNumber}</div>`:''}
 ${s.receiptHeader?`<div class="r-sub" style="font-weight:700">${esc(s.receiptHeader)}</div>`:''}
 <div class="r-line"></div>${itemRows}<div class="r-line"></div>
 <div class="r-row"><span>Subtotal</span><span>${rupiah(tx.subtotal)}</span></div>${discRows}
@@ -2107,7 +2124,9 @@ ${tx.pointsDiscount?`<div class="r-row" style="color:var(--rose)"><span>Tukar ${
 ${tx.pointsEarned?`<div class="r-line"></div><div class="r-row" style="color:var(--accent-2);font-weight:700"><span>★ Poin didapat</span><span>+${tx.pointsEarned} poin</span></div>`:''}
 <div class="r-line"></div><div class="r-foot">${esc(footerTxt).replace(/\n/g,'<br>')}<br>${esc(s.storeName||'MAGOJI')} POS</div></div>`;
 }
-function openReceipt(tx){lastReceiptTx=tx;$('#receiptPaper').innerHTML=receiptHTML(tx);openModal('receiptModal');}
+function openReceipt(tx){lastReceiptTx=tx;$('#receiptPaper').innerHTML=receiptHTML(tx);
+$('#kirimDapurRow').style.display=(tx.kitchenItems&&tx.kitchenItems.length&&!tx.queueSent)?'block':'none';
+openModal('receiptModal');}
 $('#btnPrint').addEventListener('click',()=>window.print());
 /* ---------- PRODUK + CSV ---------- */
 let prodFilter='',prodCtx=null;
