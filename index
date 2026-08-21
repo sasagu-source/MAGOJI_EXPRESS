@@ -60,10 +60,10 @@
         <p>Silakan pilih modul yang ingin diakses</p>
 
         <div class="menu-container">
-            <!-- Tautan langsung mengarah ke folder dan file index.html di dalamnya -->
-            <a href="MAGOJI_EXPRESS/POS_MAGOJI.html" class="btn">Modul POS MAGOJI</a>
-            <a href="MAGOJI_EXPRESS/dapur-monitor.html" class="btn">Modul MONITOR DAPUR</a>
-            <a href="MAGOJI_EXPRESS/POS_SASAGU_EXPRESS.html" class="btn">Modul POS SASAGU EXPRESS</a>
+            <!-- Tautan telah diperbarui sesuai struktur folder baru -->
+            <a href="POS-MAGOJI/index.html" class="btn">Modul POS MAGOJI</a>
+            <a href="MONITOR-MAGOJI/index.html" class="btn">Modul MONITOR DAPUR</a>
+            <a href="POS-SASAGU/index.html" class="btn">Modul POS SASAGU EXPRESS</a>
         </div>
     </div>
 
